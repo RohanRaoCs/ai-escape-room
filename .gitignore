@@ -6,3 +6,4 @@ Thumbs.db
 results/bench_log.txt
 
 .vercel
+*.docx

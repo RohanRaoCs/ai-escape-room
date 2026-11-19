@@ -1,122 +1,75 @@
-/* Evaluation harness shared by the browser Benchmark tab and the Node CLI (tools/bench.js).
- * Three experiments:
- *   1. Full missions: agent configurations × seeds under a dynamics level
- *   2. Planner micro-benchmark: identical queries for A*, Dijkstra, Greedy, BFS (states explored, cost, optimality)
- *   3. CSP solver comparison on generated locks (assignments, backtracks, checks, time) */
+/* Evaluation, shared by the web page ("Run evaluation") and `npm run bench`.
+ * Measures from the brief: success rate, completion time (ticks), path cost, states explored. */
 (function (G) {
   'use strict';
   const ER = (G.ER = G.ER || {});
 
-  const AGENT_CONFIGS = [
-    { id: 'unit7', label: 'UNIT-7 full: A* + fuzzy + space-time + BT', algo: 'astar', fuzzy: true, timeAware: true, adaptive: true },
-    { id: 'snapshot', label: 'A* + fuzzy, snapshot planning', algo: 'astar', fuzzy: true, timeAware: false, adaptive: true },
-    { id: 'crisp', label: 'A* + crisp avoidance (no fuzzy)', algo: 'astar', fuzzy: false, timeAware: true, adaptive: true },
-    { id: 'dijkstra', label: 'Dijkstra + fuzzy + space-time', algo: 'dijkstra', fuzzy: true, timeAware: true, adaptive: true },
-    { id: 'greedy', label: 'Greedy best-first + fuzzy + space-time', algo: 'greedy', fuzzy: true, timeAware: true, adaptive: true },
-    { id: 'bfs', label: 'BFS + fuzzy + space-time', algo: 'bfs', fuzzy: true, timeAware: true, adaptive: true },
-    { id: 'script', label: 'Fixed script (plans once, never adapts)', algo: 'astar', fuzzy: false, timeAware: false, adaptive: false },
+  const AGENTS = [
+    { id: 'astar', label: 'A* + behaviour tree', algo: 'astar', adaptive: true },
+    { id: 'dijkstra', label: 'Dijkstra + behaviour tree', algo: 'dijkstra', adaptive: true },
+    { id: 'bfs', label: 'BFS + behaviour tree', algo: 'bfs', adaptive: true },
+    { id: 'script', label: 'Fixed script (no replanning)', algo: 'astar', adaptive: false },
   ];
 
-  const METRICS = ['success', 'ticks', 'moves', 'pathCost', 'expanded', 'planCalls', 'replans', 'planMs', 'hits', 'zaps', 'hazardSteps', 'integrity', 'cspAssign', 'hackTicks'];
+  const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN);
 
-  function meanStd(xs) {
-    if (!xs.length) return { mean: NaN, std: NaN };
-    const m = xs.reduce((a, b) => a + b, 0) / xs.length;
-    const v = xs.reduce((a, b) => a + (b - m) * (b - m), 0) / Math.max(1, xs.length - 1);
-    return { mean: m, std: Math.sqrt(v) };
-  }
-
+  /* Summarise mission results. Ticks and path cost are averaged over successful runs only. */
   function summarize(rows) {
-    const out = { n: rows.length };
-    for (const k of METRICS) out[k] = meanStd(rows.map((r) => r[k]));
-    // Completion-time metrics over successful runs only (failures would be capped at maxTicks).
     const ok = rows.filter((r) => r.success);
-    out.ticksOk = meanStd(ok.map((r) => r.ticks));
-    out.costOk = meanStd(ok.map((r) => r.pathCost));
-    const reasons = {};
-    for (const r of rows) reasons[r.reason] = (reasons[r.reason] || 0) + 1;
-    out.reasons = reasons;
-    return out;
+    return {
+      n: rows.length,
+      success: mean(rows.map((r) => r.success)),
+      ticks: mean(ok.map((r) => r.ticks)),
+      pathCost: mean(ok.map((r) => r.pathCost)),
+      expanded: mean(rows.map((r) => r.expanded)),
+      replans: mean(rows.map((r) => r.replans)),
+      hits: mean(rows.map((r) => r.hits)),
+    };
   }
 
-  function* missionJobs(configs, seeds, dynamics) {
-    for (const c of configs) for (const s of seeds) yield { cfg: Object.assign({}, c, { seed: s, dynamics }), config: c };
-  }
-
-  function plannerMicro(seeds) {
-    const algos = ['astar', 'dijkstra', 'greedy', 'bfs'];
-    const rows = [];
+  /* Planner comparison on identical start -> goal queries (no dynamics). */
+  function plannerCompare(seeds) {
+    const out = {};
+    for (const algo of ['astar', 'dijkstra', 'bfs']) out[algo] = { expanded: [], cost: [], optimal: [] };
     for (const seed of seeds) {
-      const w = ER.generateWorld(seed, {});
-      w.gatesActive = false;
-      // Sprinkle the coolant over a region so costs are non-uniform (BFS/Greedy can be suboptimal).
-      const rng = ER.RNG(seed + 555);
+      const w = ER.generateWorld(seed);
+      const rng = ER.RNG(seed + 555); // scatter coolant so step costs are uneven
       for (let k = 0; k < 40; k++) { const x = rng.int(1, w.W - 2), y = rng.int(1, w.H - 2); if (w.isFree(x, y) && !w.isObjectCell(w.idx(x, y))) w.hazard[w.idx(x, y)] = 1; }
-      const targets = [w.exit].concat(w.keys, [w.terminal]);
-      for (const tg of targets) {
-        const ref = ER.plan(w, w.start.x, w.start.y, tg.x, tg.y, { algo: 'dijkstra' });
-        for (const algo of algos) {
-          const r = ER.plan(w, w.start.x, w.start.y, tg.x, tg.y, { algo });
-          rows.push({ seed, algo, expanded: r.expanded, cost: r.cost, optimal: Math.abs(r.cost - ref.cost) < 1e-9 ? 1 : 0, gap: (r.cost - ref.cost) / ref.cost, ms: r.ms, len: r.path.length - 1 });
+      for (const goal of [w.exit, w.terminal, ...w.keys]) {
+        const best = ER.plan(w, w.start.x, w.start.y, goal.x, goal.y, { algo: 'dijkstra' }).cost;
+        for (const algo in out) {
+          const r = ER.plan(w, w.start.x, w.start.y, goal.x, goal.y, { algo });
+          out[algo].expanded.push(r.expanded); out[algo].cost.push(r.cost); out[algo].optimal.push(r.cost === best ? 1 : 0);
         }
-        // Space-time A* with gates switched on, versus snapshot A*.
-        w.gatesActive = true;
-        for (const ta of [false, true]) {
-          const r = ER.plan(w, w.start.x, w.start.y, tg.x, tg.y, { algo: 'astar', timeAware: ta, t0: 0 });
-          rows.push({ seed, algo: ta ? 'astar_st' : 'astar_snap', expanded: r.expanded, cost: r.cost, optimal: NaN, gap: NaN, ms: r.ms, len: r.path.length - 1 });
-        }
-        w.gatesActive = false;
       }
     }
-    const by = {};
-    for (const r of rows) (by[r.algo] = by[r.algo] || []).push(r);
     const summary = {};
-    for (const a in by) {
-      summary[a] = {
-        n: by[a].length,
-        expanded: meanStd(by[a].map((r) => r.expanded)),
-        cost: meanStd(by[a].map((r) => r.cost)),
-        optimalRate: meanStd(by[a].map((r) => r.optimal)).mean,
-        gap: meanStd(by[a].map((r) => r.gap)).mean,
-        ms: meanStd(by[a].map((r) => r.ms)),
-      };
-    }
-    return { rows, summary };
+    for (const algo in out) summary[algo] = { queries: out[algo].cost.length, expanded: mean(out[algo].expanded), cost: mean(out[algo].cost), optimal: mean(out[algo].optimal) };
+    return summary;
   }
 
-  function cspBench(nLocks, seed0) {
-    const modes = Object.keys(ER.CSP_MODES);
-    const rows = [];
+  /* CSP comparison on the same generated locks. */
+  function cspCompare(nLocks) {
+    const out = {};
+    for (const mode in ER.CSP_MODES) out[mode] = { assignments: [], backtracks: [], correct: [] };
     for (let k = 0; k < nLocks; k++) {
-      const lock = ER.makeLock(ER.RNG((seed0 || 1) * 1000 + k), 5);
-      for (const mode of modes) {
+      const lock = ER.makeLock(ER.RNG(7000 + k));
+      for (const mode in out) {
         const r = ER.solveCSP(lock, { mode });
-        const valid = r.solution && r.solution.join() === lock.secret.join() ? 1 : 0;
-        rows.push({ lock: k, mode, clues: lock.constraints.length, assignments: r.stats.assignments, backtracks: r.stats.backtracks, checks: r.stats.checks, prunes: r.stats.prunes, ms: r.ms, valid });
+        out[mode].assignments.push(r.stats.assignments); out[mode].backtracks.push(r.stats.backtracks);
+        out[mode].correct.push(r.solution && r.solution.join() === lock.secret.join() ? 1 : 0);
       }
     }
     const summary = {};
-    for (const m of modes) {
-      const rs = rows.filter((r) => r.mode === m);
-      summary[m] = {
-        n: rs.length,
-        assignments: meanStd(rs.map((r) => r.assignments)),
-        backtracks: meanStd(rs.map((r) => r.backtracks)),
-        checks: meanStd(rs.map((r) => r.checks)),
-        ms: meanStd(rs.map((r) => r.ms)),
-        valid: meanStd(rs.map((r) => r.valid)).mean,
-        clues: meanStd(rs.map((r) => r.clues)).mean,
-      };
-    }
-    return { rows, summary };
+    for (const mode in out) summary[mode] = { locks: nLocks, assignments: mean(out[mode].assignments), backtracks: mean(out[mode].backtracks), correct: mean(out[mode].correct) };
+    return summary;
   }
 
   function toCSV(rows) {
     if (!rows.length) return '';
     const cols = Object.keys(rows[0]);
-    const esc = (v) => (typeof v === 'string' && /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v);
-    return cols.join(',') + '\n' + rows.map((r) => cols.map((c) => esc(r[c])).join(',')).join('\n') + '\n';
+    return cols.join(',') + '\n' + rows.map((r) => cols.map((c) => r[c]).join(',')).join('\n') + '\n';
   }
 
-  Object.assign(ER, { AGENT_CONFIGS, BENCH_METRICS: METRICS, meanStd, summarize, missionJobs, plannerMicro, cspBench, toCSV });
+  Object.assign(ER, { AGENTS, summarize, plannerCompare, cspCompare, toCSV, mean });
 })(typeof globalThis !== 'undefined' ? globalThis : window);

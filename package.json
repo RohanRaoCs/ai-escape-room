@@ -1,7 +1,7 @@
 {
   "name": "ai-escape-room",
   "version": "1.0.0",
-  "description": "UNIT-7 Escape Protocol: an intelligent agent that plans, decides and adapts in a dynamic escape room (A*, CSP, behaviour tree, fuzzy logic, FSM, Q-learning).",
+  "description": "UNIT-7 Escape Protocol: an intelligent agent that plans, decides and adapts in a dynamic escape room (A* search, constraint satisfaction, behaviour tree).",
   "private": true,
   "license": "MIT",
   "engines": { "node": ">=18" },

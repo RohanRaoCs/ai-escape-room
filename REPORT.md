@@ -1,224 +1,188 @@
-# UNIT-7 Escape Protocol: an intelligent agent for dynamic puzzle solving
+# UNIT-7 Escape Protocol: Design and Implementation Report
 
-## 1. Overview
+**CSCI218 Foundations of Artificial Intelligence, Group Project (Topic 10: AI Escape Room)**
+Group 2, Abdullah Wed 10:30–12:30 lab. Submitted to Dr. Abdullah and Dr. Milan.
 
-UNIT-7 is a maintenance android trapped in a research facility. The facility is a procedurally generated 31×21 grid world built from a maze with extra loops and open rooms, and every map is reproducible from a seed. To escape, the agent must:
-
-1. collect **three keycards**, choosing the order itself,
-2. reach the **lock terminal** and deduce the vault code from the clues printed there (a constraint satisfaction puzzle),
-3. reach the **vault exit** while the code is still valid.
-
-The environment changes during execution, so a fixed action sequence fails (Section 5 measures how often):
-
-| Dynamic element | Mechanism |
+| Member | Student ID |
 |---|---|
-| **Security drone** | Moves every tick and is controlled by an FSM (Patrol, Alert, Chase, Cooldown). It detects the agent by radius plus line of sight. Contact costs 25% integrity and a 2-tick stun. |
-| **Ceiling collapses** | Scheduled events that turn a cell **2–12 steps ahead on the agent's current planned route** into rubble. The cell is chosen so that all objectives stay reachable. |
-| **Laser gates** | Corridor cells that are ON for 4 of every 10 ticks, each with its own phase. Standing in an active gate costs 12% integrity. |
-| **Coolant leak** | Spreads one cell at a time. Coolant cells cost 6 instead of 1 and damage the hull. |
-| **Power surge** | Rewires two lock dials. Clues that no longer hold are removed and new ones are added, so the constraint set changes mid-run and a known code becomes invalid. |
-| **Operator** | In the app, the user can drop rubble, spill coolant, move the drone, trigger events or sound an alarm at any time. |
+| Rohan | to be added |
+| Ibraam | to be added |
+| Vidhi | to be added |
+| Ziya | to be added |
+| Yousef | to be added |
 
-Dynamics have three levels: **Static** (none), **Dynamic** (drone, gates, 3 collapses, 1 surge) and **Chaos** (drone with radius 6, 6 collapses, 2 surges, faster leak).
+## 1. Problem
 
-## 2. Architecture
+The task is to build an escape room in which an intelligent agent navigates an environment, overcomes obstacles, solves a challenge and reaches a goal. The environment must change during execution, and the agent must respond rather than follow a fixed sequence of actions. The solution is evaluated with measures such as completion time, path cost, states explored and success rate.
 
-![Architecture](docs/how-it-works.png)
+**Our escape room.** The environment is a 31 × 21 grid facility generated from a seed (a maze with some loops). The agent, UNIT-7, starts in the top-left corner and must:
 
-Each tick: scheduled events fire, coolant spreads, sensors update (a BFS distance field from the drone and a fuzzy threat table), the agent's behaviour tree ticks, the drone's FSM ticks, then collisions and win/lose conditions are resolved. The engine (`js/core/`) has no DOM dependency, so the browser app and the Node test and benchmark tools run identical code.
+1. collect **three keycards**, in an order it chooses;
+2. go to the **terminal** and solve the **vault lock**, a logic puzzle;
+3. reach the **exit**, which only opens once the lock is solved.
 
-## 3. AI techniques
+**What changes during a run** (the "Dynamic events" setting):
 
-### 3.1 A* search with plan monitoring and repair (`search.js`, `agent.js`)
+| Dynamic element | What happens |
+|---|---|
+| Moving obstacle | A security drone patrols the facility and chases the agent when it sees it. Contact costs 25% hull and a 2-tick stun. |
+| Route becomes unavailable | Three ceiling collapses per run drop rubble 2–12 steps ahead on the agent's **current planned route**. |
+| Constraint changes | One power surge per run rewires two lock dials: some clues are removed and new ones added, so a code the agent already found stops working. |
+| Changing costs | A coolant leak spreads slowly. Coolant cells cost 6 to cross instead of 1. |
 
-- **Search.** A*, Dijkstra (uniform cost), Greedy best-first and BFS share one implementation. A* uses the Manhattan heuristic, which is admissible because the minimum step cost is 1, and breaks ties toward larger *g*.
-- **Cost model.** Step cost = 1, +5 on coolant, + a **fuzzy threat penalty** `(threat − 15)/85 × 30` near the drone. Routes therefore bend away from danger in proportion to how dangerous it is.
-- **Space-time planning.** The state is *(cell, t mod 10)* and a WAIT action is allowed. Arrival at every cell is checked against the gate schedule at the actual arrival time, so the agent plans to pause and pass through a gate the moment it switches off. *Snapshot* planning (gates frozen at planning time) is kept as an ablation.
-- **Plan monitoring.** Every tick the remaining plan is validated and repaired when:
-  - a cell has become rubble ("route blocked"),
-  - a gate would fire ("gate timing"),
-  - the agent is no longer on the plan, after an evasion or a zap ("deviated"),
-  - or the risk-weighted cost of the remaining route rose more than 20% since planning ("threat drift").
-- **Mission planning.** The keycard order is chosen by evaluating all 3! tours (agent → k₁ → k₂ → k₃ → terminal) with BFS distances. This is re-evaluated as the map changes.
+A mission fails if the hull reaches 0% or 600 ticks pass.
 
-### 3.2 Constraint satisfaction (`csp.js`)
+![Screenshot](docs/screenshot.png)
 
-- **Model.** Variables D1–D5, domains {0..9}. Constraint types:
-  - AllDifferent,
-  - an optional checksum,
-  - unary clues (parity, primality, bounds),
-  - binary clues (*Di + Dj = k*, *Di > Dj*, *|Di − Dj| = k*).
-- **Puzzle generation.** Random true clues are added until the solution count is exactly 1. Then every clue whose removal keeps the solution unique is deleted, which leaves a **minimal** puzzle (6.2 clues on average).
-- **Solvers.** Four, in increasing strength:
-  - plain chronological backtracking,
-  - backtracking + forward checking,
-  - + MRV with degree tie-break,
-  - + node consistency and **AC-3** before search.
-- **Effect on the mission.** Dialling in the code takes ⌈assignments/4⌉ ticks, so solver quality directly changes escape time.
-- **Constraint change.** A power surge mutates the lock. The behaviour tree notices because "Vault unlocked?" now fails, and the CSP re-solves the new constraint set. If the surge happens mid-solve, partial work is discarded.
+## 2. AI techniques
 
-### 3.3 Behaviour tree (`bt.js`, `agent.js`)
+We use three techniques covered in the subject, plus a small finite state machine for the adversary.
 
-A reactive tree (composites re-evaluated from the root every tick):
+### 2.1 A* search for navigation (`js/core/search.js`)
+
+- **States and moves:** each state is a grid cell, and the agent moves up, down, left or right.
+- **Step cost:** 1, or 6 on coolant.
+- **Heuristic:** the Manhattan distance to the goal. It never overestimates, because every step costs at least 1, so A* always returns a cheapest path.
+- **Avoiding the drone:** the drone's cell and the cells next to it are treated as blocked, so routes keep clear of it.
+- **Comparison:** the same function also runs Dijkstra (no heuristic) and breadth-first search (ignores costs), so the three can be compared on identical problems.
+
+**Responding to change.** Every tick, the agent checks the rest of its route. It plans a new route when:
+
+- a cell on the route has become rubble;
+- the drone has moved onto or next to the route;
+- the agent is no longer on the route, for example after evading.
+
+**Keycard order.** The agent tries all 3! = 6 orders, measuring each with breadth-first distances, and picks the shortest tour that ends at the terminal.
+
+### 2.2 Constraint satisfaction for the lock (`js/core/csp.js`)
+
+- **Variables:** five dials, D1 to D5.
+- **Domain:** each dial is a digit from 0 to 9.
+- **Constraints:** all dials differ, plus clues such as *D1 is odd*, *D3 > 4*, *D2 + D4 = 11*, *D3 > D5* and *|D1 − D2| = 3*.
+
+**Generating the puzzle.** The generator picks a secret code, adds true clues until exactly one code fits, then removes every clue that is not needed. Each puzzle is therefore fair (exactly one answer) and minimal.
+
+**Two solvers:**
+
+- **Plain backtracking:** assign the dials in order and undo when a clue is broken.
+- **MRV + forward checking:** always fill the dial with the fewest remaining options, and after each assignment remove values from the other dials that can no longer work.
+
+In the simulation, dialling in the code takes one tick per four solver assignments. A better solver therefore makes the agent escape sooner. When a power surge changes the clues, the solver runs again on the new constraint set.
+
+### 2.3 Behaviour tree for decisions (`js/core/bt.js`, `js/core/agent.js`)
 
 ```
-? Root
-├─ → Survive          ◇ Threat high? (fuzzy)          ▸ Evade drone
-├─ → Escape           ◇ Vault unlocked?                ▸ Navigate → exit
-├─ → Crack the lock   ◇ All keycards held?             ▸ Navigate → terminal   ▸ Solve lock (CSP)
-├─ → Collect keycards ▸ Optimise keycard tour          ▸ Navigate → keycard
-└─ ▸ Hold position    (no route currently exists)
+? Root (try children in order until one succeeds or is running)
+├─ → Survive          ◇ Drone chasing nearby?   ▸ Evade drone
+├─ → Escape           ◇ Vault unlocked?         ▸ Go to exit
+├─ → Crack the lock   ◇ All keycards held?      ▸ Go to terminal   ▸ Solve lock (CSP)
+├─ → Collect keycards ▸ Choose next keycard     ▸ Go to keycard (A*)
+└─ ▸ Hold position    (when no route exists right now)
 ```
 
-Because it is reactive, **Survive** pre-empts navigation the instant the threat crosses the threshold, and a power surge needs no special-case code: "Vault unlocked?" fails, so the tree drops to "Crack the lock".
+The tree is evaluated **from the root every tick**, so higher branches interrupt lower ones:
 
-### 3.4 Fuzzy logic (`fuzzy.js`)
+- When the drone gets close, *Survive* takes over at once, and the agent returns to its task when the danger has passed.
+- After a power surge, *Vault unlocked?* becomes false and the tree falls through to *Crack the lock*. No special code is needed for this case.
 
-A Mamdani system (min for AND, max aggregation, centroid defuzzification) with three inputs:
+### 2.4 Finite state machine for the drone (`js/core/drone.js`)
 
-- **drone distance**, measured along corridors by BFS, so walls shield the agent: Near, Medium, Far,
-- **drone alertness**, taken from its FSM state: Calm, Alert,
-- **hull integrity**: Critical, Healthy.
+The drone has three states:
 
-Nine rules map these to a threat level from VeryLow to VeryHigh (0–100). For example: *IF distance is Near AND drone is Alert THEN threat is VeryHigh*; *IF distance is Medium AND integrity is Critical THEN threat is Medium*. A damaged agent therefore becomes more cautious.
+- **Patrol** between waypoints at half speed. It switches to Chase when it sees the agent, meaning within 5 cells with a clear line of sight.
+- **Chase** at two-thirds speed. It switches to Cooldown after losing sight for 6 ticks, or after 30 ticks (battery).
+- **Cooldown** for 12 ticks, during which it cannot detect the agent, then back to Patrol.
 
-The threat has two uses:
+## 3. Implementation
 
-1. a per-cell cost penalty inside A*,
-2. the BT condition *threat ≥ 68*, with 12 points of hysteresis, which triggers evasion. Evasion is a local BFS (depth 5) that picks the reachable cell minimising threat + 3 × distance.
+- **Language and structure:** JavaScript, with no libraries. The same engine files run in the browser (`index.html`) and in Node.js for the tests and the evaluation.
+- **Reproducibility:** all randomness comes from a seeded generator, so a seed reproduces the same map, events and results.
 
-### 3.5 Finite state machine (`drone.js`)
+| File | Purpose |
+|---|---|
+| `js/core/world.js` | Map generation, tiles, keycards, coolant |
+| `js/core/search.js` | A*, Dijkstra, BFS |
+| `js/core/csp.js` | Lock generation, two CSP solvers, power-surge mutation |
+| `js/core/bt.js` | Behaviour tree nodes (selector, sequence, condition, action) |
+| `js/core/agent.js` | The agent: behaviour tree, navigation, replanning, lock solving, fixed-script baseline |
+| `js/core/drone.js` | Drone finite state machine |
+| `js/core/sim.js` | Simulation loop, dynamic events, collisions, win/lose |
+| `js/core/bench.js`, `tools/bench.js` | Evaluation |
+| `js/core/tests.js`, `tools/test.js` | Correctness tests |
+| `index.html`, `js/ui/app.js` | Web page: live simulation, panels, evaluation table |
 
-The drone is the adversary:
+**Running it**
 
-- Patrol → Alert when it sees the agent.
-- In Alert it investigates the last-seen position. It moves to Chase if it still sees the agent after 2 ticks, and goes back to Patrol if it reaches that spot and finds nothing.
-- Chase → Cooldown after 6 ticks without sight, or when its 30-tick battery runs out.
-- Cooldown → Patrol after 12 ticks.
+- Open `index.html` in a browser, or run `npm start` and visit http://localhost:3000.
+- `npm test` runs 9 correctness tests.
+- `npm run bench` regenerates the results below into `results/`.
 
-### 3.6 Reinforcement learning (`qlearn.js`, Learning lab)
+## 4. Evaluation
 
-Tabular Q-learning on a 17×11 facility with 2 keycards:
+**Method.** Each agent ran 100 missions on the same 100 maps (seeds 5000–5099), once with dynamic events off and once with them on. Completion time and path cost are averaged over successful runs.
 
-- **State:** (cell, keycard bitmask). **Actions:** N, E, S, W.
-- **Rewards:** −1 per step, −5 for hitting a wall, +30 per new keycard, +100 for exiting with all keycards.
-- **Parameters:** α = 0.2, γ = 0.97, ε-greedy with ε decaying from 1 to 0.05.
+The **fixed script** is a baseline. It plans the whole mission once with A* at the start and never replans or evades. This is the "fixed sequence of actions" the brief warns against.
 
-Q-learning is used as a **contrast to planning**, not as UNIT-7's controller: a learned policy cannot respond to a map change until it is retrained (Section 5.4).
+### 4.1 Missions
 
-## 4. Evaluation method
+**Static facility** (nothing changes)
 
-- `tools/bench.js` runs every configuration on the **same 100 seeded facilities** (seeds 5000–5099) at each dynamics level, with a 900-tick limit.
-- The two tuned parameters were chosen on a **separate tuning set** (seeds 1000–1059) and not re-tuned on the test seeds: the fuzzy risk weight (30) and the evasion threshold (68).
-- Measures: **success rate**; **completion time** (ticks); **path cost** (sum of step costs actually paid); **states explored** (A* node expansions, summed over all plans in the mission); replans by cause; drone hits; laser zaps; final integrity; planning time.
-- Completion time and path cost are averaged over successful runs only.
-- Full tables and per-episode CSVs are in `results/`.
-
-Configurations:
-
-| Id | Planner | Fuzzy | Space-time | Adaptive (BT + replanning) |
+| Agent | Success rate | Completion time (ticks) | Path cost | States explored |
 |---|---|---|---|---|
-| **UNIT-7 full** | A* | ✓ | ✓ | ✓ |
-| Snapshot | A* | ✓ | ✗ | ✓ |
-| Crisp | A* | ✗, rule: "chasing and ≤ 3 cells" plus drone ±1 blocked | ✓ | ✓ |
-| Dijkstra / Greedy / BFS | as named | ✓ | ✓ | ✓ |
-| **Fixed script** | A*, planned once at t = 0 | ✗ | ✗ | ✗ |
+| A* + behaviour tree | 100% | 142 | 139 | 379 |
+| Dijkstra + behaviour tree | 100% | 142 | 139 | 858 |
+| BFS + behaviour tree | 100% | 142 | 140 | 862 |
+| Fixed script | 100% | 142 | 139 | 378 |
 
-## 5. Results
+**Dynamic facility** (drone, collapses, coolant, lock change)
 
-### 5.1 Missions (100 held-out facilities per cell)
+| Agent | Success rate | Completion time (ticks) | Path cost | States explored | Replans | Drone hits |
+|---|---|---|---|---|---|---|
+| A* + behaviour tree | **97%** | 232 | 218 | 2,661 | 5.4 | 0.18 |
+| Dijkstra + behaviour tree | 97% | 230 | 215 | 3,586 | 5.1 | 0.19 |
+| BFS + behaviour tree | 97% | 228 | 219 | 3,598 | 5.1 | 0.18 |
+| Fixed script | **20%** | 133 | 130 | 378 | 0 | 1.31 |
 
-**Success rate**
+### 4.2 Planners on identical queries
 
-| Configuration | Static | Dynamic | Chaos |
+These are 200 start-to-goal queries on maps with 40 extra coolant cells, so the cheapest path is not always the shortest one.
+
+| Planner | States explored | Path cost | Optimal |
 |---|---|---|---|
-| **UNIT-7 full** | 100% | **100%** | **95%** |
-| A* + fuzzy, snapshot planning | 100% | 91% | 74% |
-| A* + crisp avoidance | 100% | 100% | 98% |
-| Dijkstra + fuzzy + space-time | 100% | 100% | 97% |
-| Greedy + fuzzy + space-time | 100% | 95% | 84% |
-| BFS + fuzzy + space-time | 100% | 97% | 83% |
-| **Fixed script** | 100% | **32%** | **11%** |
+| A* | **125** | 48.9 | 100% |
+| Dijkstra | 199 | 48.9 | 100% |
+| Breadth-first | 203 | 52.1 | 55% |
 
-**Dynamic facility in detail** (mean ± std)
+### 4.3 Lock solvers (100 generated locks)
 
-| Configuration | Ticks | Path cost | States explored | Replans | Drone hits | Laser zaps | Integrity |
-|---|---|---|---|---|---|---|---|
-| UNIT-7 full | 195 ± 72 | 198 ± 74 | 14,671 | 7.6 | 0.08 | 0.01 | 93 |
-| Snapshot | 227 ± 115 | 227 ± 108 | 6,766 | 17.8 | 0.16 | 0.36 | 85 |
-| Crisp | 180 ± 78 | 176 ± 71 | 10,817 | 3.5 | 0.08 | 0.00 | 94 |
-| Dijkstra | 197 ± 74 | 199 ± 76 | 23,805 | 7.8 | 0.11 | 0.00 | 93 |
-| Greedy | 197 ± 70 | 207 ± 76 | 5,714 | 11.2 | 0.38 | 0.00 | 81 |
-| BFS | 177 ± 66 | 188 ± 78 | 24,181 | 9.5 | 0.32 | 0.00 | 82 |
-| Fixed script | 122 ± 22 | 123 ± 26 | 309 | 0 | 1.70 | 0.19 | 54 |
+| Solver | Assignments | Backtracks | Correct |
+|---|---|---|---|
+| Plain backtracking | 1,064 | 1,059 | 100% |
+| MRV + forward checking | **15** | **10** | 100% |
 
-Why UNIT-7 replanned (Dynamic, per episode): route blocked 1.33, gate conflict **0.00**, threat drift / drone 5.66, deviated 0.63.
+### 4.4 Discussion
 
-**Findings**
+- **Adapting is what makes the agent succeed.** With nothing changing, the fixed script does as well as the adaptive agent (100%). With dynamic events it drops to 20%. It timed out in 61 runs, stuck behind rubble or at an exit whose code had changed, and was destroyed in 19 runs by drone hits. The adaptive agent escaped 97 of 100 (2 timeouts, 1 destroyed). The fixed script's short completion time is misleading: it only finishes on the maps where nothing went wrong.
+- **A\* is the most efficient planner.** It finds the same optimal paths as Dijkstra while exploring 37% fewer states on identical queries, and 26% fewer over a whole dynamic mission. BFS explores as much as Dijkstra and is optimal on only 55% of queries, because it ignores the extra cost of coolant.
+- **Constraint propagation matters.** MRV with forward checking needs about 70 times fewer assignments than plain backtracking. That is the difference between about 4 ticks and about 266 ticks at the terminal.
+- **Limitations.** The agent knows the whole map, while a real robot would have to explore. The drone avoidance is a simple rule (never step next to it), which can occasionally leave the agent with no route until the drone moves. A predictive model of the drone could do better.
 
-1. **Adaptation is what makes the agent succeed.** On a static map the fixed script is as good as anything (100%). With dynamics it collapses to 32% (Dynamic) and 11% (Chaos). Its failures split almost evenly between timing out (stuck at rubble it cannot route around, or at a door relocked by a surge: 34 and 40 runs) and being destroyed (1.7–2.2 drone hits per run: 34 and 49 runs). Its low completion time is a survivorship effect: it only finishes on maps where nothing went wrong. The adaptive agents are 95–100%.
-2. **Space-time planning removes laser-gate failures.** Snapshot planning replans 2.3× more (17.8 vs 7.6), gets zapped 36× more often (0.36 vs 0.01 per run) and drops to 91% / 74% success. Space-time A* never needed a gate-caused replan.
-3. **A* is the right planner.** It matches Dijkstra's success and path cost while exploring **38% fewer states** over a whole mission. Greedy explores least but is less reliable (84% in Chaos) and takes the most hits, because its paths ignore cost, including the threat cost. BFS also ignores cost and takes roughly 4× more drone hits than A*.
-4. **Fuzzy vs crisp threat handling (an honest result).** The fuzzy agent did **not** beat the crisp baseline on success: 100% vs 100% in Dynamic, and 95% vs 98% in Chaos (3 runs out of 100, within noise). It was slower in Dynamic (195 vs 180 ticks). The crisp baseline is stronger than it looks, because it *hard-blocks* every cell next to the drone during planning. The fuzzy agent instead *trades off* risk against distance, so it sometimes accepts a risky shortcut. That trade-off pays off in Chaos, where fuzzy explores fewer states (18.6k vs 23.4k) and finishes faster (225 vs 235 ticks). Tuning the fuzzy agent mattered: with the untuned risk weight of 10 it reached 90% in Chaos on the tuning seeds against crisp's 95% (54 vs 57 of 60), and tuning closed that gap there (Section 6). The fuzzy controller's main advantage is graded, explainable behaviour (the rule strengths are visible live in the app) rather than raw success rate.
+## 5. Testing
 
-### 5.2 Planner micro-benchmark (200 identical queries, coolant-weighted costs)
+`npm test` checks:
 
-| Planner | States explored | Path cost | Optimal | Cost above optimal |
-|---|---|---|---|---|
-| A* | **118 ± 87** | 45.5 | **100%** | 0.0% |
-| Dijkstra | 209 ± 98 | 45.5 | 100% | 0.0% |
-| Greedy best-first | 53 ± 30 | 54.2 | 36% | +19.0% |
-| BFS | 210 ± 98 | 49.4 | 48% | +8.0% |
-| A* snapshot (gates on) | 121 ± 88 | 46.6 | n/a | n/a |
-| A* space-time (gates on) | 830 ± 786 | 45.8 | n/a | n/a |
+- A* returns optimal, valid paths (150 queries compared against Dijkstra);
+- A* explores fewer states than Dijkstra;
+- every lock has exactly one solution, and both solvers find it;
+- MRV + forward checking needs fewer assignments than plain backtracking;
+- every power surge produces a valid new puzzle;
+- the behaviour tree interrupts and resumes correctly;
+- runs are reproducible from the seed;
+- the agent escapes every static map;
+- the adaptive agent clearly beats the fixed script on dynamic maps.
 
-A* is optimal on every query, as admissibility guarantees (also checked by `tools/test.js`), and explores 44% fewer states than Dijkstra. Space-time search costs about 7× more states per query, about 0.5 ms, which is cheap given that it removes all gate failures.
+All 9 tests pass.
 
-### 5.3 CSP solvers (100 generated locks)
+## References
 
-| Solver | Assignments | Backtracks | Constraint checks | Correct |
-|---|---|---|---|---|
-| Plain backtracking | 1,396.7 | 1,391.7 | 3,088 | 100% |
-| + forward checking | 61.8 | 56.8 | 1,927 | 100% |
-| MRV + forward checking | 25.0 | 20.0 | 1,253 | 100% |
-| **MRV + FC + AC-3** | **8.4** | **3.5** | **896** | 100% |
-
-MRV + FC + AC-3 needs **166× fewer assignments** than plain backtracking. In the mission this is the difference between about 3 ticks and about 350 ticks at the terminal. All generated locks were verified to have exactly one solution, before and after every power surge.
-
-### 5.4 Learning vs planning
-
-| | Learned policy | A* |
-|---|---|---|
-| Episodes until the greedy policy first escapes | 50–150 | 0 (no training) |
-| Steps to escape on the trained map | optimal on 6 of 8 maps, within 9% on the other 2 | optimal |
-| After a collapse on the learned route | **fails on 8 of 8 maps** (walks into the new wall) | replans instantly, under 1 ms |
-| Recovery | 50–250 more episodes of training | n/a |
-
-Q-learning gives cheap, near-optimal decisions once trained but cannot respond to change without retraining. That is why UNIT-7 uses planning for navigation and keeps learning in the lab as a comparison.
-
-## 6. Design iterations
-
-Benchmarking exposed problems that changed the design:
-
-- **Livelock between agent and drone.** At first the drone froze when it spotted the agent; the agent backed away out of sight, the drone gave up, and the cycle repeated until the time limit (about 5% of runs). Two fixes: the drone now *investigates* the last-seen position, and the fuzzy rule *Near ∧ Calm* was lowered from High to Medium threat, so the agent can slip past a drone that is not hunting. Dynamic success went from 94% to 100%.
-- **Risk weight tuning.** With a weak threat penalty (10) the fuzzy agent walked close to drones and was hit 0.53 times per Chaos run. A sweep on the tuning seeds chose weight 30 and threshold 68, which reduced hits to 0.23.
-- **Honest highlighting.** The benchmark UI only marks a "best" completion time among configurations with at least 50% success, so the fixed script's survivorship-biased times are not shown as best.
-
-## 7. Limitations and possible extensions
-
-- The agent has full knowledge of the map. Partial observability, for example a sensor radius with map discovery, would make D* Lite-style incremental replanning worthwhile.
-- Space-time planning knows the gate schedule but not the drone's future moves. A predictive drone model could feed time-indexed risk into the same search.
-- Fuzzy membership functions were hand-designed. They could be tuned automatically, for example by a genetic algorithm over the benchmark.
-- Q-learning is tabular. A function approximator could generalise across maps, which tabular Q-learning cannot.
-
-## 8. Reproducing
-
-```bash
-npm test         # 19 tests: A*/Dijkstra optimality, space-time gate safety, CSP uniqueness, fuzzy monotonicity, BT pre-emption, determinism, adaptive vs fixed plan, RL convergence
-npm run bench    # writes results/summary.md and per-episode CSVs (about 1 minute)
-npm start        # serves the site at http://localhost:3000
-```
-
-In the website:
-- The **Testing guide** page runs the same 19 tests in the browser and walks through each requirement with pre-configured simulator links.
-- The **Benchmark** page reproduces the mission experiments.
+Russell, S. and Norvig, P. (2021) *Artificial Intelligence: A Modern Approach*, 4th edn. Pearson. Chapters 3 (search) and 6 (constraint satisfaction problems).

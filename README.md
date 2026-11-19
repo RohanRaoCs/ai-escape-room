@@ -1,6 +1,6 @@
 # UNIT-7 Escape Protocol
 
-**CSCI218 Group Project.** Made for Dr. Abdullah and Dr. Milan by Group 2, Abdullah Wed 10:30–12:30 lab.
+**CSCI218 Group Project (Topic 10: AI Escape Room).** Made for Dr. Abdullah and Dr. Milan by Group 2, Abdullah Wed 10:30–12:30 lab.
 
 | Member | Student ID |
 |---|---|
@@ -10,76 +10,41 @@
 | Ziya | to be added |
 | Yousef | to be added |
 
-An AI escape room. A maintenance android, UNIT-7, has to escape a research facility that keeps changing around it. It must collect three keycards, crack a vault lock and reach the exit, while a drone hunts it, laser gates switch on and off, ceilings collapse onto its planned route and power surges rewire the lock.
+An AI agent escapes a grid facility. It collects three keycards, solves a lock puzzle at a terminal, and reaches the exit, while a drone patrols, ceilings collapse onto its route and the lock's rules change mid-run.
 
-The agent combines six AI techniques: **A\* search** (planned in space and time), **constraint satisfaction**, a **behaviour tree**, **fuzzy logic**, a **finite state machine** and **Q-learning**.
+- **A\* search** plans the routes and replans when the route is blocked.
+- **Constraint satisfaction** solves the lock (backtracking with MRV and forward checking).
+- **A behaviour tree** decides what to do each tick.
+- **A finite state machine** controls the drone.
 
-**Live site: https://ai-escape-room-self.vercel.app** (start with the [Testing guide](https://ai-escape-room-self.vercel.app/testing.html))
+![Screenshot](docs/screenshot.png)
 
-![Simulator](docs/simulator.png)
+## Run it
 
-## Quick start
+- **In a browser:** open `index.html`, or visit the live copy at https://ai-escape-room-self.vercel.app
+- **Tests:** `npm test` (9 tests)
+- **Evaluation:** `npm run bench` (100 maps per agent; writes `results/summary.md` and `results/missions.csv`)
 
-| What you want | How |
-|---|---|
-| Use it | Open the deployed site, or double-click `index.html` (no install or build needed). |
-| Run the tests | Open the **Testing guide** page and press *Run all tests*, or run `npm test`. |
-| Reproduce the results | Run `npm run bench` (100 facilities, about a minute; writes `results/`). |
-| Serve it locally | Run `npm start`, then open http://localhost:3000. |
+You need Node.js 18 or later for the commands. There is nothing to install.
 
-You need Node.js 18 or later for the commands. There are no dependencies to install.
+## Results (100 maps, dynamic events on)
 
-## The website
+| Agent | Success rate | Ticks | Path cost | States explored |
+|---|---|---|---|---|
+| A* + behaviour tree | 97% | 232 | 218 | 2,661 |
+| Dijkstra + behaviour tree | 97% | 230 | 215 | 3,586 |
+| BFS + behaviour tree | 97% | 228 | 219 | 3,598 |
+| Fixed script (no replanning) | 20% | 133 | 130 | 378 |
 
-| Page | What it does |
-|---|---|
-| **Home** | What the project is, how each requirement of the brief is met, and a live run. |
-| **Simulator** | Watch the agent live. Explained panels show its behaviour tree, fuzzy threat reasoning, lock solver and the drone's state machine. You can change the facility while it runs, and eight guided scenarios each show one behaviour. |
-| **Benchmark** | Run hundreds of missions across seven agent designs and compare success rate, completion time, path cost and states explored. Includes a planner comparison, a solver comparison and CSV export. |
-| **Learning lab** | Train a Q-learning agent, inspect its learned values and policy, then collapse its route and compare it with A\*. |
-| **How it works** | Each technique explained, with a link to see it in the simulator. |
-| **Testing guide** | Runs all 19 tests in the browser, plus a checklist for every requirement in the brief, linked to pre-configured scenarios. |
+The design, implementation and full results are in [REPORT.md](REPORT.md).
 
-Simulator links can set it up directly, for example `simulator.html?scenario=block` or `simulator.html?seed=5033&dyn=normal&time=0`. The parameters are:
-
-- `scenario`: one of escape, block, surge, script, gates, alarm, csp, chaos
-- `seed`: which facility to generate
-- `dyn`: off, normal or chaos
-- `algo`: astar, dijkstra, greedy or bfs
-- `csp`: bt, fc, mrv_fc or mrv_fc_ac3
-- `fuzzy`, `time`, `adaptive`: set to 0 to switch that feature off
-- `autoplay`: set to 0 to start paused
-
-## Results (100 held-out facilities)
-
-| | Static | Dynamic | Chaos |
-|---|---|---|---|
-| UNIT-7 (all techniques) | 100% | **100%** | **95%** |
-| Fixed script (plans once, never adapts) | 100% | 32% | 11% |
-
-- **Search:** A\* explores 38% fewer states than Dijkstra over a whole mission and is optimal on every test query.
-- **Lock solving:** MRV + forward checking + AC-3 needs 8 assignments where plain backtracking needs about 1,400.
-- **Laser gates:** planning in time cuts laser hits from 0.36 to 0.01 per run.
-
-The full method and results, including where the agent falls short, are in [REPORT.md](REPORT.md).
-
-## Deploy your own copy
-
-The site is static HTML, CSS and JavaScript.
-
-- **Vercel:** import the repository at vercel.com/new and press Deploy (`vercel.json` is included), or run `npx vercel` from this folder.
-- **GitHub Pages:** go to Settings → Pages, deploy from the `main` branch, root folder.
-
-## Project layout
+## Files
 
 ```
-index.html, simulator.html, benchmark.html,
-learning.html, how-it-works.html, testing.html   the website
-css/style.css                                    styles
-js/core/   engine (shared by the browser and Node)
-           world, search, csp, fuzzy, bt, drone, agent, sim, qlearn, bench, tests
-js/ui/     page scripts (site chrome, simulator, benchmark, lab, testing, home)
-tools/     test.js, bench.js, serve.js, load.js (Node entry points)
-results/   benchmark output used in the report
-docs/      screenshots
+index.html          the web page
+css/style.css       styles
+js/core/            engine: world, search, csp, bt, drone, agent, sim, bench, tests
+js/ui/app.js        page logic (drawing, panels, evaluation table)
+tools/              Node scripts: test.js, bench.js, serve.js, load.js
+results/            evaluation output used in the report
 ```
