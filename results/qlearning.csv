@@ -1,0 +1,9 @@
+seed,firstSuccess,learnedSteps,optimal,afterCollapse,astarAfter,recoverEpisodes
+1,150,36,34,walks into a wall,36,50
+2,150,49,45,walks into a wall,45,250
+3,100,38,38,walks into a wall,42,150
+4,50,34,34,walks into a wall,48,250
+5,100,36,36,walks into a wall,36,50
+6,100,38,38,walks into a wall,38,100
+7,100,35,35,walks into a wall,39,150
+8,100,48,48,walks into a wall,50,100
