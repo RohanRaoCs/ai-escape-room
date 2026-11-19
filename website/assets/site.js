@@ -38,7 +38,7 @@
   footer.innerHTML =
     '<div class="inner">' +
     '<span>CSCI218 Group Project, Group 2. Search, constraint satisfaction, a behaviour tree, fuzzy logic, a state machine and Q-learning, written in Python.</span>' +
-    `<span><a href="testing.html">Testing guide</a> · <a href="${REPO}" target="_blank" rel="noopener">GitHub</a> · <a href="${REPO}/blob/main/REPORT.md" target="_blank" rel="noopener">Report</a></span>` +
+    `<span><a href="testing.html">Testing guide</a> · <a href="${REPO}" target="_blank" rel="noopener">GitHub</a> · <a href="${REPO}/blob/main/docs/REPORT.md" target="_blank" rel="noopener">Report</a></span>` +
     '</div>';
   document.body.appendChild(footer);
 
@@ -52,7 +52,7 @@
       const py = await loadPyodide();
       py.FS.mkdirTree('/home/pyodide/escape_room');
       await Promise.all(FILES.map(async (f) => {
-        const res = await fetch(`escape_room/${f}.py`, { cache: 'no-cache' });
+        const res = await fetch(`../escape_room/${f}.py`, { cache: 'no-cache' });
         if (!res.ok) throw new Error(`could not load escape_room/${f}.py`);
         py.FS.writeFile(`/home/pyodide/escape_room/${f}.py`, await res.text());
       }));

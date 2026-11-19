@@ -66,15 +66,17 @@ The desktop app (`python main.py`) has the same controls and panels apart from t
 | BFS + fuzzy + space-time | 100% | 94% | 81% |
 | Fixed script (plans once, never adapts) | 100% | **22%** | **7%** |
 
-The design, method and discussion are in [REPORT.md](REPORT.md).
+The design, method and discussion are in [docs/REPORT.md](docs/REPORT.md).
 
 ## Files
 
 ```
 main.py                  desktop demo window (Tkinter)
 evaluate.py              full evaluation -> results/
-index.html, simulator.html, benchmark.html, learning.html, how-it-works.html, testing.html
-web/                     drawing and page scripts; they load escape_room/ into the browser with Pyodide
+index.html               forwards to website/ (so the site opens at the root URL)
+website/                 the six pages: index, simulator, benchmark, learning, how-it-works, testing
+  assets/                stylesheet and page scripts; they load escape_room/ into the browser with Pyodide
+docs/                    REPORT.md (design, method, results) and the screenshot
 escape_room/
   world.py               seeded facility: maze, rooms, keycards, terminal, laser gates, coolant
   search.py              A*, Dijkstra, greedy best-first, BFS; snapshot or space-time
@@ -88,8 +90,8 @@ escape_room/
   evaluation.py          experiments
   checks.py              the 19 correctness checks (used by the tests and the Testing page)
   view.py, web.py        panel contents, and the bridge to the website
-tests/test_escape_room.py
-results/                 evaluation output used in the report
+tests/test_escape_room.py  runs escape_room/checks.py with unittest
+results/                 evaluation output (summary.md and one CSV per experiment)
 ```
 
 ## Deployment

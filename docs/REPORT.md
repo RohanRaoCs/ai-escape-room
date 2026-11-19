@@ -35,7 +35,7 @@ A mission fails if the hull reaches 0% or 900 ticks pass.
 
 Any of these can also be triggered by hand in the simulator, and the user can drop rubble, spill coolant or move the drone by clicking the map.
 
-![Screenshot of the simulator](docs/screenshot.png)
+![Screenshot of the simulator](screenshot.png)
 
 ## 2. Architecture
 
@@ -166,7 +166,7 @@ It shows why UNIT-7 uses planning for navigation: a learned table only describes
 | `escape_room/checks.py`, `tests/` | The 19 correctness checks |
 | `escape_room/view.py`, `escape_room/web.py` | Panel contents and the bridge to the website |
 | `main.py` | Desktop app |
-| `*.html`, `web/` | Website: Home, Simulator, Benchmark, Learning lab, How it works, Testing guide |
+| `website/` | Website: Home, Simulator, Benchmark, Learning lab, How it works, Testing guide |
 
 ## 5. Evaluation
 
