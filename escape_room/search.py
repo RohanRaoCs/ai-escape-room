@@ -1,8 +1,15 @@
-"""Path planning: A*, Dijkstra and breadth-first search behind one function.
+"""Path planning: A*, Dijkstra, greedy best-first and breadth-first search behind one function.
 
 - A*       : priority = g + h, with h = Manhattan distance (admissible, since every step costs >= 1)
 - Dijkstra : priority = g (uniform-cost search, no heuristic)
+- Greedy   : priority = h only (fast, but ignores what the path has cost so far)
 - BFS      : first-in first-out queue; ignores step costs (fewest steps, not cheapest path)
+
+Two state spaces:
+- snapshot   : state = cell. Laser gates are frozen in their state at planning time t0.
+- space-time : state = (cell, time mod GATE_PERIOD). A WAIT action is allowed and each arrival
+               is checked against the gate timetable at the real arrival time, so the agent
+               can time its way through a gate instead of detouring.
 """
 import heapq
 import math
@@ -10,74 +17,131 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-from .world import DIRS
+from .world import FLOOR, GATE_ON, GATE_PERIOD
 
-ALGOS = {"astar": "A*", "dijkstra": "Dijkstra", "bfs": "Breadth-first"}
+ALGOS = {"astar": "A*", "dijkstra": "Dijkstra", "greedy": "Greedy best-first", "bfs": "Breadth-first"}
 
 
 @dataclass
 class PlanResult:
     found: bool
-    path: list = field(default_factory=list)  # list of (x, y), start first
+    path: list = field(default_factory=list)  # list of (x, y), start first; a repeated cell is a wait
+    cum: list = field(default_factory=list)  # cumulative cost along the path
     cost: float = math.inf
     expanded: int = 0  # states taken off the frontier and expanded
     order: list = field(default_factory=list)  # cells in the order they were expanded
     ms: float = 0.0
+    time_aware: bool = False
 
 
-def plan(world, start, goal, algo="astar", cost_fn=None):
+def plan(world, start, goal, algo="astar", cost_fn=None, time_aware=False, t0=0, ignore_gates=False, max_expand=200000):
     """Plan from start (x, y) to goal (x, y). cost_fn(cell) gives the cost of entering a cell;
     returning math.inf means "never enter this cell"."""
-    t0 = time.perf_counter()
+    clock = time.perf_counter()
     cost_fn = cost_fn or world.cell_cost
-    W = world.W
-    s, g_cell = world.idx(*start), world.idx(*goal)
+    W, N, tiles = world.W, world.N, world.tiles
+    gates = world.gates_active and bool(world.gates) and not ignore_gates
+    time_aware = time_aware and gates
+    P = GATE_PERIOD if time_aware else 1
     gx, gy = goal
+    goal_cell = world.idx(*goal)
+    s0 = world.idx(*start) * P + (t0 % P if time_aware else 0)
+    inf = math.inf
 
-    def h(c):
-        return abs(c % W - gx) + abs(c // W - gy)
+    # Step cost of entering each cell, computed once per search (inf = wall or forbidden).
+    cost = [cost_fn(i) if tiles[i] == FLOOR else inf for i in range(N)]
+    # Manhattan distance to the goal; A* and greedy add a tiny tie-break on g.
+    h = [abs(i % W - gx) + abs(i // W - gy) for i in range(N)] if algo in ("astar", "greedy") else None
+    # Which ticks of the gate cycle each gate cell is on (None = never blocked).
+    gate_on = None
+    if gates:
+        gate_on = [None] * N
+        for gt in world.gates:
+            if time_aware:
+                gate_on[world.idx(gt.x, gt.y)] = [(t + gt.phase) % GATE_PERIOD < GATE_ON for t in range(GATE_PERIOD)]
+            elif world.gate_on(gt.x, gt.y, t0):
+                cost[world.idx(gt.x, gt.y)] = inf  # snapshot: frozen in its current state
 
-    g = {s: 0}
-    parent = {s: None}
-    closed = set()
+    S = N * P
+    g = [inf] * S
+    steps = [0] * S if time_aware else None
+    parent = [-1] * S
+    closed = bytearray(S)
     order = []
-    frontier = deque([s]) if algo == "bfs" else [(h(s) if algo == "astar" else 0, 0, s)]
-    tie = 0  # tie-breaker so the heap never compares cells of equal priority
+    moves = (1, -1, W, -W, 0) if time_aware else (1, -1, W, -W)
+    first_wins = algo in ("bfs", "greedy")
+    g[s0] = 0
+    frontier = deque([s0]) if algo == "bfs" else [(0, 0, s0)]
+    pop, push = heapq.heappop, heapq.heappush
+    tie = expanded = 0
+    found = -1
 
     while frontier:
-        c = frontier.popleft() if algo == "bfs" else heapq.heappop(frontier)[2]
-        if c in closed:
+        s = frontier.popleft() if algo == "bfs" else pop(frontier)[2]
+        if closed[s]:
             continue
-        closed.add(c)
+        closed[s] = 1
+        expanded += 1
+        c = s // P
         order.append(c)
-        if c == g_cell:
+        if c == goal_cell:
+            found = s
             break
-        cx, cy = c % W, c // W
-        for dx, dy in DIRS:
-            nx, ny = cx + dx, cy + dy
-            if not world.is_free(nx, ny):
+        if expanded >= max_expand:
+            break
+        gs = g[s]
+        if time_aware:
+            phase = s % P
+            nphase = (phase + 1) % P
+            gate_tick = (t0 + steps[s] + 1) % GATE_PERIOD
+        for m in moves:
+            n = c + m
+            step = cost[n]
+            if step == inf:
                 continue
-            n = ny * W + nx
-            step = cost_fn(n)
-            if n in closed or step == math.inf:
+            if time_aware:
+                cycle = gate_on[n]
+                if cycle is not None and cycle[gate_tick]:
+                    continue
+                ns = n * P + nphase
+            else:
+                ns = n
+            if closed[ns]:
                 continue
-            new_g = g[c] + step
+            new_g = gs + step
+            if first_wins:
+                if g[ns] != inf:
+                    continue
+            elif new_g >= g[ns]:
+                continue
+            g[ns] = new_g
+            parent[ns] = s
+            if time_aware:
+                steps[ns] = steps[s] + 1
             if algo == "bfs":
-                if n not in g:  # first discovery wins
-                    g[n], parent[n] = new_g, c
-                    frontier.append(n)
-            elif new_g < g.get(n, math.inf):
-                g[n], parent[n] = new_g, c
+                frontier.append(ns)
+            else:
                 tie += 1
-                heapq.heappush(frontier, (new_g + (h(n) if algo == "astar" else 0), tie, n))
+                if algo == "astar":
+                    pri = new_g + h[n] - new_g * 1e-6  # ties go to the deeper node, which saves expansions
+                elif algo == "greedy":
+                    pri = h[n] + new_g * 1e-6
+                else:
+                    pri = new_g
+                push(frontier, (pri, tie, ns))
 
-    result = PlanResult(found=g_cell in closed, expanded=len(closed), order=order)
-    if result.found:
-        c = g_cell
-        while c is not None:
-            result.path.append(world.xy(c))
-            c = parent[c]
+    result = PlanResult(found=found >= 0, expanded=expanded, order=order, time_aware=time_aware)
+    if found >= 0:
+        s = found
+        while s >= 0:
+            result.path.append(world.xy(s // P))
+            s = parent[s]
         result.path.reverse()
-        result.cost = g[g_cell]
-    result.ms = (time.perf_counter() - t0) * 1000
+        total = 0
+        result.cum.append(0)
+        for x, y in result.path[1:]:
+            total += cost[world.idx(x, y)]
+            result.cum.append(total)
+        result.cost = g[found]
+    result.ms = (time.perf_counter() - clock) * 1000
     return result

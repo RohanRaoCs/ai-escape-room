@@ -10,16 +10,20 @@
 | Ziya | to be added |
 | Yousef | to be added |
 
-An AI agent escapes a grid facility. It collects three keycards, solves a lock puzzle at a terminal, and reaches the exit, while a drone patrols, ceilings collapse onto its route and the lock's rules change mid-run.
+An AI agent escapes a facility that keeps changing around it. It collects three keycards, solves a lock puzzle at a terminal and reaches the exit. Meanwhile a drone hunts it, laser gates switch on and off, coolant spreads, ceilings collapse onto its route, and power surges rewrite the lock's rules.
 
-- **A\* search** plans the routes and replans when the route is blocked.
-- **Constraint satisfaction** solves the lock (backtracking with MRV and forward checking).
-- **A behaviour tree** decides what to do each tick.
-- **A finite state machine** controls the drone.
+| Technique | Job |
+|---|---|
+| **A\* search** (in space and time) | Plans every route, replans when the route breaks, and times its way through laser gates |
+| **Constraint satisfaction** (backtracking, forward checking, MRV, AC-3) | Generates and solves the vault lock, and solves it again when the clues change |
+| **Behaviour tree** | Decides what to do each tick: Survive > Escape > Crack the lock > Collect keycards > Hold |
+| **Fuzzy logic** (Mamdani) | Rates how dangerous each cell is, from drone distance, drone alertness and hull integrity |
+| **Finite state machine** | Controls the drone: Patrol, Alert, Chase, Cooldown |
+| **Q-learning** | A learning agent compared against planning in the Learning lab |
 
-**Live demo: https://ai-escape-room-self.vercel.app** (the same Python code, running in the browser through Pyodide)
+**Live site: https://ai-escape-room-self.vercel.app**. It runs this same Python package in the browser through Pyodide. The first visit takes about 10 seconds while Python starts.
 
-![Screenshot](docs/screenshot.png)
+![Screenshot of the simulator](docs/screenshot.png)
 
 ## Requirements
 
@@ -27,59 +31,67 @@ Python 3.9 or later. Only the standard library is used (Tkinter for the window),
 
 ## Run it
 
-Run these from the project folder:
-
 ```bash
-python main.py              # interactive demo window (desktop)
-python -m http.server       # or: the web version at http://localhost:8000
-python -m unittest -v       # 9 correctness tests
-python evaluate.py          # evaluation on 100 maps per agent -> results/summary.md, results/missions.csv
+python main.py              # desktop demo window
+python -m unittest -v       # 19 correctness tests (under a minute)
+python evaluate.py          # full evaluation, about 3 minutes -> results/summary.md and CSVs
 python evaluate.py --maps 20   # quicker evaluation
+python -m http.server       # the website locally, at http://localhost:8000
 ```
 
-**In the demo window:**
+## The website
 
-- **Run / Step / Restart / New map** control the simulation.
-- **Path planner** switches between A*, Dijkstra and breadth-first search.
-- **Lock solver** switches between plain backtracking and MRV + forward checking.
-- Untick **Replanning** to see the fixed-script baseline, which plans once and never adapts.
-- **Collapse the route** and **Change the lock** trigger dynamic events. Clicking a floor cell drops rubble.
-- The **Decisions**, **Lock** and **Log** tabs show the behaviour tree, the CSP and every decision as it happens.
+| Page | What it is for |
+|---|---|
+| **Home** | What the project is, how each requirement of the brief is covered, and a live run |
+| **Simulator** | Watch the agent live. Every technique has its own panel: Decisions, Threat, Lock, Drone and Log. You can change the agent's settings, change the facility while it runs, and follow 8 guided scenarios. |
+| **Benchmark** | Run the evaluation in the browser for 7 agent designs, plus planner and lock-solver comparisons, with charts and CSV export |
+| **Learning lab** | Train a Q-learning agent, inspect its learned values, then collapse its route and compare it with A* |
+| **How it works** | Each technique explained, with links to see it in action |
+| **Testing guide** | Run the 19 tests in the browser, and work through a checklist for each requirement |
+
+The desktop app (`python main.py`) has the same controls and panels apart from the Learning lab.
 
 ## Results
 
-100 maps per agent, dynamic events on (from `python evaluate.py`):
+100 facilities per cell, from `python evaluate.py`. Full tables are in [results/summary.md](results/summary.md).
 
-| Agent | Success rate | Ticks | Path cost | States explored |
-|---|---|---|---|---|
-| A* + behaviour tree | 99% | 223 | 214 | 2,078 |
-| Dijkstra + behaviour tree | 99% | 224 | 215 | 2,953 |
-| BFS + behaviour tree | 99% | 226 | 218 | 3,039 |
-| Fixed script (no replanning) | 13% | 128 | 125 | 395 |
+| Agent design | Static | Dynamic | Chaos |
+|---|---|---|---|
+| UNIT-7 full: A* + fuzzy + space-time + behaviour tree | 100% | **99%** | **91%** |
+| A* + fuzzy, snapshot planning (ignores the gate timetable) | 100% | 92% | 67% |
+| A* + crisp avoidance (no fuzzy) | 100% | 99% | 97% |
+| Dijkstra + fuzzy + space-time | 100% | 99% | 91% |
+| Greedy best-first + fuzzy + space-time | 100% | 94% | 82% |
+| BFS + fuzzy + space-time | 100% | 94% | 81% |
+| Fixed script (plans once, never adapts) | 100% | **22%** | **7%** |
 
-The design, implementation and full results are in [REPORT.md](REPORT.md).
+The design, method and discussion are in [REPORT.md](REPORT.md).
 
 ## Files
 
 ```
 main.py                  desktop demo window (Tkinter)
-index.html, web/         web demo: loads escape_room/ into the browser with Pyodide
-evaluate.py              evaluation script
+evaluate.py              full evaluation -> results/
+index.html, simulator.html, benchmark.html, learning.html, how-it-works.html, testing.html
+web/                     drawing and page scripts; they load escape_room/ into the browser with Pyodide
 escape_room/
-  world.py               map generation (seeded), tiles, keycards, coolant
-  search.py              A*, Dijkstra, breadth-first search
-  csp.py                 lock puzzle: generation, two solvers, power-surge changes
+  world.py               seeded facility: maze, rooms, keycards, terminal, laser gates, coolant
+  search.py              A*, Dijkstra, greedy best-first, BFS; snapshot or space-time
+  csp.py                 lock puzzle: generation, four solvers, power-surge changes
+  fuzzy.py               Mamdani fuzzy threat controller
   bt.py                  behaviour tree nodes
-  agent.py               the agent: behaviour tree, navigation, replanning, lock solving, fixed-script baseline
+  agent.py               the agent: decisions, navigation, plan monitoring, lock, evasion, fixed-script baseline
   drone.py               drone finite state machine
-  sim.py                 simulation loop and dynamic events
-  evaluation.py          evaluation helpers
-  view.py                what the panels show (shared by desktop and web)
-  web.py                 bridge between the web page and the simulation
+  sim.py                 simulation loop, dynamic events, operator tools
+  qlearn.py              Q-learning lab
+  evaluation.py          experiments
+  checks.py              the 19 correctness checks (used by the tests and the Testing page)
+  view.py, web.py        panel contents, and the bridge to the website
 tests/test_escape_room.py
 results/                 evaluation output used in the report
 ```
 
-## Web version and deployment
+## Deployment
 
-The website runs the **same Python package** in the browser through [Pyodide](https://pyodide.org), which is Python compiled to WebAssembly. There is no separate JavaScript implementation of the AI: `web/app.js` only draws the state returned by `escape_room/web.py`. The site is static, so Vercel serves it with no build step (`vercel.json`). To deploy your own copy, import the repository at vercel.com/new and press Deploy.
+The site is static: HTML pages, a little JavaScript for drawing, and the Python package, which Pyodide runs in the browser. `vercel.json` tells Vercel to serve it with no build step. To deploy your own copy, import the repository at vercel.com/new and press Deploy.

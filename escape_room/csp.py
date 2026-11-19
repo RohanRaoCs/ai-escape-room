@@ -1,21 +1,28 @@
 """Constraint Satisfaction: the vault lock.
 
 Variables  : D1..D5 (lock dials), each with domain {0..9}
-Constraints: "all dials differ" plus clues such as "D1 is odd", "D3 > 4", "D2 + D4 = 11",
-             "D3 > D5", "|D1 - D2| = 3".
+Constraints: "all dials differ", sometimes a checksum, plus clues such as "D1 is odd",
+             "D3 > 4", "D2 + D4 = 11", "D3 > D5" and "|D1 - D2| = 3".
 The generator adds true clues until exactly one code fits, then removes every clue it can
 without losing uniqueness, so each puzzle is fair and minimal.
 
-Two solvers are compared:
-  bt      plain backtracking (assign dials in order, undo on conflict)
-  mrv_fc  backtracking + MRV variable ordering + forward checking
+Four solvers are compared:
+  bt          plain backtracking (assign dials in order, undo on conflict)
+  fc          backtracking + forward checking
+  mrv_fc      + minimum-remaining-values ordering (ties broken by degree)
+  mrv_fc_ac3  + node consistency and AC-3 arc consistency before the search starts
 A power surge (mutate_lock) changes two dials and their clues while the agent is running.
 """
 import time
 from dataclasses import dataclass, field
 
 PRIMES = {2, 3, 5, 7}
-CSP_MODES = {"bt": "Plain backtracking", "mrv_fc": "MRV + forward checking"}
+CSP_MODES = {
+    "bt": "Plain backtracking",
+    "fc": "Backtracking + forward checking",
+    "mrv_fc": "MRV + forward checking",
+    "mrv_fc_ac3": "MRV + FC + AC-3",
+}
 UNSET = -1
 
 
@@ -23,13 +30,19 @@ UNSET = -1
 class Constraint:
     vars: tuple
     text: str
-    test: callable  # called only when every variable in `vars` is assigned
+    test: callable = None  # called only when every variable in `vars` is assigned
+    kind: str = "clue"  # "alldiff" | "sum" | "clue"
+    total: int = 0  # for the checksum
 
     def ok(self, a):
-        """False only if the assigned values already break this clue."""
-        if self.text == "All dials differ":
+        """False only if the values assigned so far already break this constraint."""
+        if self.kind == "alldiff":
             values = [v for v in a if v != UNSET]
             return len(values) == len(set(values))
+        if self.kind == "sum":
+            unset = sum(1 for v in a if v == UNSET)
+            s = sum(v for v in a if v != UNSET)
+            return s == self.total if unset == 0 else s <= self.total <= s + 9 * unset
         if any(a[v] == UNSET for v in self.vars):
             return True
         return self.test(*(a[v] for v in self.vars))
@@ -40,7 +53,11 @@ def D(i):
 
 
 def all_diff(n):
-    return Constraint(tuple(range(n)), "All dials differ", None)
+    return Constraint(tuple(range(n)), "All dials differ", kind="alldiff")
+
+
+def checksum(n, total):
+    return Constraint(tuple(range(n)), f"Checksum D1+...+D{n} = {total}", kind="sum", total=total)
 
 
 def random_clue(rng, s):
@@ -90,36 +107,86 @@ class Lock:
 class SolveResult:
     solution: list
     solutions: list
+    mode: str = "mrv_fc_ac3"
     assignments: int = 0
     backtracks: int = 0
+    checks: int = 0  # constraint checks
+    prunes: int = 0  # values removed from domains by forward checking / AC-3
     trace: list = field(default_factory=list)  # (dial, value) steps, value -1 = undo; used by the GUI
     ms: float = 0.0
 
 
-def solve(lock, mode="mrv_fc", limit=1, trace=False):
+def solve(lock, mode="mrv_fc_ac3", limit=1, trace=False):
     t0 = time.perf_counter()
-    smart = mode == "mrv_fc"
-    n = lock.n
-    by_var = [[c for c in lock.constraints if v in c.vars] for v in range(n)]
+    use_mrv, use_fc, use_ac3 = "mrv" in mode, "fc" in mode, "ac3" in mode
+    n, cons = lock.n, lock.constraints
+    by_var = [[c for c in cons if v in c.vars] for v in range(n)]
+    neighbours = [sorted({u for c in by_var[v] for u in c.vars if u != v}) for v in range(n)]
     a = [UNSET] * n
-    res = SolveResult(None, [])
-    state = {"domains": [list(range(10)) for _ in range(n)]}
+    res = SolveResult(None, [], mode)
+    domains = [list(range(10)) for _ in range(n)]
 
     def consistent(v):
-        return all(c.ok(a) for c in by_var[v])
+        for c in by_var[v]:
+            res.checks += 1
+            if not c.ok(a):
+                return False
+        return True
+
+    # Node consistency on one-dial clues (part of the forward-checking configurations).
+    if use_fc:
+        for v in range(n):
+            unary = [c for c in by_var[v] if len(c.vars) == 1]
+            keep = []
+            for x in domains[v]:
+                a[v] = x
+                res.checks += len(unary)
+                if all(c.ok(a) for c in unary):
+                    keep.append(x)
+            a[v] = UNSET
+            res.prunes += len(domains[v]) - len(keep)
+            domains[v] = keep
+
+    def ac3():
+        """Make every arc (i -> j) consistent: each value of Di needs a supporting value in Dj."""
+        arcs = []
+        for c in cons:
+            if c.kind == "clue" and len(c.vars) == 2:
+                i, j = c.vars
+                arcs.append((i, j, lambda x, y, c=c, i=i, j=j: c.test(x, y)))
+                arcs.append((j, i, lambda y, x, c=c, i=i, j=j: c.test(x, y)))
+            elif c.kind == "alldiff":
+                arcs += [(i, j, lambda x, y: x != y) for i in c.vars for j in c.vars if i != j]
+        queue = list(arcs)
+        while queue:
+            i, j, test = queue.pop(0)
+            keep = []
+            for x in domains[i]:
+                for y in domains[j]:
+                    res.checks += 1
+                    if test(x, y):
+                        keep.append(x)
+                        break
+            if len(keep) < len(domains[i]):
+                res.prunes += len(domains[i]) - len(keep)
+                domains[i] = keep
+                if not keep:
+                    return False
+                queue += [arc for arc in arcs if arc[1] == i and arc[0] != j]
+        return True
 
     def select_var():
         unassigned = [v for v in range(n) if a[v] == UNSET]
         if not unassigned:
             return None
-        if not smart:
+        if not use_mrv:
             return unassigned[0]  # next dial in order
-        return min(unassigned, key=lambda v: len(state["domains"][v]))  # MRV
+        # fewest remaining values first; ties go to the dial involved in most clues
+        return min(unassigned, key=lambda v: (len(domains[v]), -sum(1 for u in neighbours[v] if a[u] == UNSET)))
 
-    def forward_check():
-        """Remove values from unassigned dials that would now break a clue."""
-        domains = state["domains"]
-        for u in range(n):
+    def forward_check(v):
+        """Remove values from unassigned neighbours that would now break a clue."""
+        for u in neighbours[v]:
             if a[u] != UNSET:
                 continue
             keep = []
@@ -128,35 +195,38 @@ def solve(lock, mode="mrv_fc", limit=1, trace=False):
                 if consistent(u):
                     keep.append(x)
             a[u] = UNSET
+            res.prunes += len(domains[u]) - len(keep)
             domains[u] = keep
             if not keep:
                 return False
         return True
 
     def backtrack():
+        nonlocal domains
         v = select_var()
         if v is None:
             res.solutions.append(a.copy())
             return len(res.solutions) >= limit
-        for val in list(state["domains"][v]):
+        for val in list(domains[v]):
             a[v] = val
             res.assignments += 1
-            if trace:
+            if trace and len(res.trace) < 4000:
                 res.trace.append((v, val))
             if consistent(v):
-                saved = state["domains"]
-                if smart:
-                    state["domains"] = [d.copy() for d in saved]
-                if (not smart or forward_check()) and backtrack():
+                saved = domains
+                if use_fc:
+                    domains = [d.copy() for d in saved]
+                if (not use_fc or forward_check(v)) and backtrack():
                     return True
-                state["domains"] = saved
+                domains = saved
             a[v] = UNSET
             res.backtracks += 1
-            if trace:
+            if trace and len(res.trace) < 4000:
                 res.trace.append((v, UNSET))
         return False
 
-    backtrack()
+    if all(domains) and (not use_ac3 or ac3()):
+        backtrack()
     res.solution = res.solutions[0] if res.solutions else None
     res.ms = (time.perf_counter() - t0) * 1000
     return res
@@ -186,9 +256,11 @@ def make_unique(lock, rng):
             lock.constraints.insert(k, c)
 
 
-def make_lock(rng):
-    secret = rng.sample(range(10), 5)
-    lock = Lock(secret, [all_diff(5)])
+def make_lock(rng, n=5):
+    secret = rng.sample(range(10), n)
+    lock = Lock(secret, [all_diff(n)], n)
+    if rng.random() < 0.6:
+        lock.constraints.append(checksum(n, sum(secret)))
     make_unique(lock, rng)
     return lock
 
@@ -196,14 +268,15 @@ def make_lock(rng):
 def mutate_lock(lock, rng):
     """Power surge: rewire two dials, drop clues that no longer hold, add new ones."""
     s = lock.secret.copy()
-    positions = rng.sample(range(5), 2)
+    positions = rng.sample(range(lock.n), 2)
     unused = rng.sample([d for d in range(10) if d not in s], 2)
     for p, d in zip(positions, unused):
         s[p] = d
     before = [c.text for c in lock.constraints]
     lock.secret = s
-    lock.constraints = [c for c in lock.constraints if c.ok(s)]
-    removed = [t for t in before if t not in {c.text for c in lock.constraints}]
+    lock.constraints = [c for c in lock.constraints if c.kind == "alldiff" or c.ok(s)]
+    kept = {c.text for c in lock.constraints}
+    removed = [t for t in before if t not in kept]
     make_unique(lock, rng)
     added = [c.text for c in lock.constraints if c.text not in before]
     lock.version += 1
