@@ -337,6 +337,18 @@ details.about ul { margin: 0 0 6px; padding-left: 18px; }
 .hero h1 { font-size: 2.3rem; line-height: 1.12; letter-spacing: -0.01em; margin-bottom: 14px; }
 .hero p { color: var(--ink-2); font-size: 1.05rem; max-width: 52ch; }
 .hero .btnrow { margin-top: 20px; }
+.hero .course {
+  margin: 0 0 20px; padding: 10px 14px 12px;
+  border: 1px solid var(--line); border-left: 3px solid var(--ink); border-radius: 6px;
+  background: var(--surface); font-size: 0.88rem; line-height: 1.5; color: var(--ink-2);
+}
+.hero .course p { margin: 0; font-size: 0.88rem; color: var(--ink-2); max-width: none; }
+.hero .course b { color: var(--ink); }
+.team { list-style: none; margin: 10px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line-soft); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.team li { display: flex; flex-direction: column; min-width: 0; }
+.team li b { font-weight: 600; font-size: 0.88rem; }
+.team li span { font-size: 0.76rem; color: var(--ink-3); }
+@media (max-width: 760px) { .team { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .hero .btn { padding: 9px 16px; font-size: 0.95rem; }
 .hero-live { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
 .hero-live canvas { display: block; width: 100%; height: auto; border-radius: 4px; }

@@ -1,5 +1,15 @@
 # UNIT-7 Escape Protocol
 
+**CSCI218 Group Project.** Made for Dr. Abdullah and Dr. Milan by Group 2, Abdullah Wed 10:30–12:30 lab.
+
+| Member | Student ID |
+|---|---|
+| Rohan | to be added |
+| Ibraam | to be added |
+| Vidhi | to be added |
+| Ziya | to be added |
+| Yousef | to be added |
+
 An AI escape room. A maintenance android, UNIT-7, has to escape a research facility that keeps changing around it. It must collect three keycards, crack a vault lock and reach the exit, while a drone hunts it, laser gates switch on and off, ceilings collapse onto its planned route and power surges rewire the lock.
 
 The agent combines six AI techniques: **A\* search** (planned in space and time), **constraint satisfaction**, a **behaviour tree**, **fuzzy logic**, a **finite state machine** and **Q-learning**.
