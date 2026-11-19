@@ -1,9 +1,6 @@
-node_modules/
+__pycache__/
+*.pyc
+results_run.log
 .vercel/
-.playwright-mcp/
-.DS_Store
-Thumbs.db
-results/bench_log.txt
-
-.vercel
 *.docx
+.playwright-mcp/

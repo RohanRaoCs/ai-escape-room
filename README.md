@@ -19,32 +19,57 @@ An AI agent escapes a grid facility. It collects three keycards, solves a lock p
 
 ![Screenshot](docs/screenshot.png)
 
+## Requirements
+
+Python 3.9 or later. Only the standard library is used (Tkinter for the window), so there is nothing to install.
+
 ## Run it
 
-- **In a browser:** open `index.html`, or visit the live copy at https://ai-escape-room-self.vercel.app
-- **Tests:** `npm test` (9 tests)
-- **Evaluation:** `npm run bench` (100 maps per agent; writes `results/summary.md` and `results/missions.csv`)
+Run these from the project folder:
 
-You need Node.js 18 or later for the commands. There is nothing to install.
+```bash
+python main.py              # interactive demo window
+python -m unittest -v       # 9 correctness tests
+python evaluate.py          # evaluation on 100 maps per agent -> results/summary.md, results/missions.csv
+python evaluate.py --maps 20   # quicker evaluation
+```
 
-## Results (100 maps, dynamic events on)
+**In the demo window:**
+
+- **Run / Step / Restart / New map** control the simulation.
+- **Path planner** switches between A*, Dijkstra and breadth-first search.
+- **Lock solver** switches between plain backtracking and MRV + forward checking.
+- Untick **Replanning** to see the fixed-script baseline, which plans once and never adapts.
+- **Collapse the route** and **Change the lock** trigger dynamic events. Clicking a floor cell drops rubble.
+- The **Decisions**, **Lock** and **Log** tabs show the behaviour tree, the CSP and every decision as it happens.
+
+## Results
+
+100 maps per agent, dynamic events on (from `python evaluate.py`):
 
 | Agent | Success rate | Ticks | Path cost | States explored |
 |---|---|---|---|---|
-| A* + behaviour tree | 97% | 232 | 218 | 2,661 |
-| Dijkstra + behaviour tree | 97% | 230 | 215 | 3,586 |
-| BFS + behaviour tree | 97% | 228 | 219 | 3,598 |
-| Fixed script (no replanning) | 20% | 133 | 130 | 378 |
+| A* + behaviour tree | 99% | 223 | 214 | 2,078 |
+| Dijkstra + behaviour tree | 99% | 224 | 215 | 2,953 |
+| BFS + behaviour tree | 99% | 226 | 218 | 3,039 |
+| Fixed script (no replanning) | 13% | 128 | 125 | 395 |
 
 The design, implementation and full results are in [REPORT.md](REPORT.md).
 
 ## Files
 
 ```
-index.html          the web page
-css/style.css       styles
-js/core/            engine: world, search, csp, bt, drone, agent, sim, bench, tests
-js/ui/app.js        page logic (drawing, panels, evaluation table)
-tools/              Node scripts: test.js, bench.js, serve.js, load.js
-results/            evaluation output used in the report
+main.py                  demo window (Tkinter)
+evaluate.py              evaluation script
+escape_room/
+  world.py               map generation (seeded), tiles, keycards, coolant
+  search.py              A*, Dijkstra, breadth-first search
+  csp.py                 lock puzzle: generation, two solvers, power-surge changes
+  bt.py                  behaviour tree nodes
+  agent.py               the agent: behaviour tree, navigation, replanning, lock solving, fixed-script baseline
+  drone.py               drone finite state machine
+  sim.py                 simulation loop and dynamic events
+  evaluation.py          evaluation helpers
+tests/test_escape_room.py
+results/                 evaluation output used in the report
 ```

@@ -32,19 +32,19 @@ The task is to build an escape room in which an intelligent agent navigates an e
 
 A mission fails if the hull reaches 0% or 600 ticks pass.
 
-![Screenshot](docs/screenshot.png)
+![Screenshot of the demo](docs/screenshot.png)
 
 ## 2. AI techniques
 
 We use three techniques covered in the subject, plus a small finite state machine for the adversary.
 
-### 2.1 A* search for navigation (`js/core/search.js`)
+### 2.1 A* search for navigation (`escape_room/search.py`)
 
 - **States and moves:** each state is a grid cell, and the agent moves up, down, left or right.
 - **Step cost:** 1, or 6 on coolant.
 - **Heuristic:** the Manhattan distance to the goal. It never overestimates, because every step costs at least 1, so A* always returns a cheapest path.
-- **Avoiding the drone:** the drone's cell and the cells next to it are treated as blocked, so routes keep clear of it.
-- **Comparison:** the same function also runs Dijkstra (no heuristic) and breadth-first search (ignores costs), so the three can be compared on identical problems.
+- **Avoiding the drone:** the drone's cell and the cells next to it are treated as blocked (cost infinity), so routes keep clear of it.
+- **Comparison:** the same function also runs Dijkstra (no heuristic) and breadth-first search (ignores costs), so the three can be compared on identical problems. It is implemented with `heapq` (a priority queue) for A* and Dijkstra, and with `collections.deque` (a FIFO queue) for BFS.
 
 **Responding to change.** Every tick, the agent checks the rest of its route. It plans a new route when:
 
@@ -52,9 +52,9 @@ We use three techniques covered in the subject, plus a small finite state machin
 - the drone has moved onto or next to the route;
 - the agent is no longer on the route, for example after evading.
 
-**Keycard order.** The agent tries all 3! = 6 orders, measuring each with breadth-first distances, and picks the shortest tour that ends at the terminal.
+**Keycard order.** The agent tries all 3! = 6 orders (`itertools.permutations`), measuring each with breadth-first distances, and picks the shortest tour that ends at the terminal.
 
-### 2.2 Constraint satisfaction for the lock (`js/core/csp.js`)
+### 2.2 Constraint satisfaction for the lock (`escape_room/csp.py`)
 
 - **Variables:** five dials, D1 to D5.
 - **Domain:** each dial is a digit from 0 to 9.
@@ -69,7 +69,7 @@ We use three techniques covered in the subject, plus a small finite state machin
 
 In the simulation, dialling in the code takes one tick per four solver assignments. A better solver therefore makes the agent escape sooner. When a power surge changes the clues, the solver runs again on the new constraint set.
 
-### 2.3 Behaviour tree for decisions (`js/core/bt.js`, `js/core/agent.js`)
+### 2.3 Behaviour tree for decisions (`escape_room/bt.py`, `escape_room/agent.py`)
 
 ```
 ? Root (try children in order until one succeeds or is running)
@@ -85,37 +85,37 @@ The tree is evaluated **from the root every tick**, so higher branches interrupt
 - When the drone gets close, *Survive* takes over at once, and the agent returns to its task when the danger has passed.
 - After a power surge, *Vault unlocked?* becomes false and the tree falls through to *Crack the lock*. No special code is needed for this case.
 
-### 2.4 Finite state machine for the drone (`js/core/drone.js`)
+### 2.4 Finite state machine for the drone (`escape_room/drone.py`)
 
 The drone has three states:
 
-- **Patrol** between waypoints at half speed. It switches to Chase when it sees the agent, meaning within 5 cells with a clear line of sight.
+- **Patrol** between waypoints at half speed. It switches to Chase when it sees the agent, meaning within 5 cells with a clear line of sight (Bresenham's line algorithm).
 - **Chase** at two-thirds speed. It switches to Cooldown after losing sight for 6 ticks, or after 30 ticks (battery).
 - **Cooldown** for 12 ticks, during which it cannot detect the agent, then back to Patrol.
 
 ## 3. Implementation
 
-- **Language and structure:** JavaScript, with no libraries. The same engine files run in the browser (`index.html`) and in Node.js for the tests and the evaluation.
-- **Reproducibility:** all randomness comes from a seeded generator, so a seed reproduces the same map, events and results.
+- **Language and libraries:** Python 3, using only the standard library. The demo window uses Tkinter.
+- **Reproducibility:** all randomness comes from `random.Random(seed)`, so a seed reproduces the same map, events and results.
 
 | File | Purpose |
 |---|---|
-| `js/core/world.js` | Map generation, tiles, keycards, coolant |
-| `js/core/search.js` | A*, Dijkstra, BFS |
-| `js/core/csp.js` | Lock generation, two CSP solvers, power-surge mutation |
-| `js/core/bt.js` | Behaviour tree nodes (selector, sequence, condition, action) |
-| `js/core/agent.js` | The agent: behaviour tree, navigation, replanning, lock solving, fixed-script baseline |
-| `js/core/drone.js` | Drone finite state machine |
-| `js/core/sim.js` | Simulation loop, dynamic events, collisions, win/lose |
-| `js/core/bench.js`, `tools/bench.js` | Evaluation |
-| `js/core/tests.js`, `tools/test.js` | Correctness tests |
-| `index.html`, `js/ui/app.js` | Web page: live simulation, panels, evaluation table |
+| `escape_room/world.py` | Map generation, tiles, keycards, coolant, breadth-first distances |
+| `escape_room/search.py` | A*, Dijkstra, BFS |
+| `escape_room/csp.py` | Lock generation, two CSP solvers, power-surge mutation |
+| `escape_room/bt.py` | Behaviour tree nodes (selector, sequence, condition, action) |
+| `escape_room/agent.py` | The agent: behaviour tree, navigation, replanning, lock solving, fixed-script baseline |
+| `escape_room/drone.py` | Drone finite state machine |
+| `escape_room/sim.py` | Simulation loop, dynamic events, collisions, win/lose |
+| `escape_room/evaluation.py`, `evaluate.py` | Evaluation |
+| `tests/test_escape_room.py` | Correctness tests (`unittest`) |
+| `main.py` | Demo window: live map, behaviour tree, lock, log and controls |
 
 **Running it**
 
-- Open `index.html` in a browser, or run `npm start` and visit http://localhost:3000.
-- `npm test` runs 9 correctness tests.
-- `npm run bench` regenerates the results below into `results/`.
+- `python main.py` opens the demo.
+- `python -m unittest -v` runs 9 tests.
+- `python evaluate.py` regenerates the results below into `results/`.
 
 ## 4. Evaluation
 
@@ -129,19 +129,19 @@ The **fixed script** is a baseline. It plans the whole mission once with A* at t
 
 | Agent | Success rate | Completion time (ticks) | Path cost | States explored |
 |---|---|---|---|---|
-| A* + behaviour tree | 100% | 142 | 139 | 379 |
-| Dijkstra + behaviour tree | 100% | 142 | 139 | 858 |
-| BFS + behaviour tree | 100% | 142 | 140 | 862 |
-| Fixed script | 100% | 142 | 139 | 378 |
+| A* + behaviour tree | 100% | 142 | 139 | 396 |
+| Dijkstra + behaviour tree | 100% | 142 | 139 | 860 |
+| BFS + behaviour tree | 100% | 142 | 140 | 861 |
+| Fixed script | 100% | 142 | 139 | 395 |
 
 **Dynamic facility** (drone, collapses, coolant, lock change)
 
 | Agent | Success rate | Completion time (ticks) | Path cost | States explored | Replans | Drone hits |
 |---|---|---|---|---|---|---|
-| A* + behaviour tree | **97%** | 232 | 218 | 2,661 | 5.4 | 0.18 |
-| Dijkstra + behaviour tree | 97% | 230 | 215 | 3,586 | 5.1 | 0.19 |
-| BFS + behaviour tree | 97% | 228 | 219 | 3,598 | 5.1 | 0.18 |
-| Fixed script | **20%** | 133 | 130 | 378 | 0 | 1.31 |
+| A* + behaviour tree | **99%** | 223 | 214 | 2,078 | 5.0 | 0.08 |
+| Dijkstra + behaviour tree | 99% | 224 | 215 | 2,953 | 4.8 | 0.09 |
+| BFS + behaviour tree | 99% | 226 | 218 | 3,039 | 4.9 | 0.07 |
+| Fixed script | **13%** | 128 | 125 | 395 | 0 | 1.16 |
 
 ### 4.2 Planners on identical queries
 
@@ -149,30 +149,30 @@ These are 200 start-to-goal queries on maps with 40 extra coolant cells, so the 
 
 | Planner | States explored | Path cost | Optimal |
 |---|---|---|---|
-| A* | **125** | 48.9 | 100% |
-| Dijkstra | 199 | 48.9 | 100% |
-| Breadth-first | 203 | 52.1 | 55% |
+| A* | **129** | 49.9 | 100% |
+| Dijkstra | 202 | 49.9 | 100% |
+| Breadth-first | 204 | 53.6 | 42% |
 
 ### 4.3 Lock solvers (100 generated locks)
 
 | Solver | Assignments | Backtracks | Correct |
 |---|---|---|---|
-| Plain backtracking | 1,064 | 1,059 | 100% |
-| MRV + forward checking | **15** | **10** | 100% |
+| Plain backtracking | 2,343 | 2,338 | 100% |
+| MRV + forward checking | **13** | **8** | 100% |
 
 ### 4.4 Discussion
 
-- **Adapting is what makes the agent succeed.** With nothing changing, the fixed script does as well as the adaptive agent (100%). With dynamic events it drops to 20%. It timed out in 61 runs, stuck behind rubble or at an exit whose code had changed, and was destroyed in 19 runs by drone hits. The adaptive agent escaped 97 of 100 (2 timeouts, 1 destroyed). The fixed script's short completion time is misleading: it only finishes on the maps where nothing went wrong.
-- **A\* is the most efficient planner.** It finds the same optimal paths as Dijkstra while exploring 37% fewer states on identical queries, and 26% fewer over a whole dynamic mission. BFS explores as much as Dijkstra and is optimal on only 55% of queries, because it ignores the extra cost of coolant.
-- **Constraint propagation matters.** MRV with forward checking needs about 70 times fewer assignments than plain backtracking. That is the difference between about 4 ticks and about 266 ticks at the terminal.
+- **Adapting is what makes the agent succeed.** With nothing changing, the fixed script does as well as the adaptive agent (100%). With dynamic events it drops to 13%. It timed out in 74 runs, stuck behind rubble or at an exit whose code had changed, and was destroyed in 13 runs by drone hits. The adaptive agent escaped 99 of 100 (1 timeout). The fixed script's short completion time is misleading: it only finishes on the maps where nothing went wrong.
+- **A\* is the most efficient planner.** It finds the same optimal paths as Dijkstra while exploring 36% fewer states on identical queries, and 30% fewer over a whole dynamic mission. BFS explores as much as Dijkstra and is optimal on only 42% of queries, because it ignores the extra cost of coolant.
+- **Constraint propagation matters.** MRV with forward checking needs about 177 times fewer assignments than plain backtracking. In the simulation that is about 4 ticks at the terminal instead of about 586, which is nearly the whole 600-tick time limit.
 - **Limitations.** The agent knows the whole map, while a real robot would have to explore. The drone avoidance is a simple rule (never step next to it), which can occasionally leave the agent with no route until the drone moves. A predictive model of the drone could do better.
 
 ## 5. Testing
 
-`npm test` checks:
+`python -m unittest -v` checks:
 
-- A* returns optimal, valid paths (150 queries compared against Dijkstra);
-- A* explores fewer states than Dijkstra;
+- A* returns optimal, valid paths (compared against Dijkstra on 100 queries);
+- A* explores no more states than Dijkstra;
 - every lock has exactly one solution, and both solvers find it;
 - MRV + forward checking needs fewer assignments than plain backtracking;
 - every power surge produces a valid new puzzle;
