@@ -12,6 +12,7 @@ from tkinter import ttk
 from escape_room.csp import CSP_MODES
 from escape_room.search import ALGOS
 from escape_room.sim import MAX_TICKS, Simulation
+from escape_room.view import lock_view, route_view, tree_view
 from escape_room.world import FLOOR, RUBBLE, WALL
 
 CELL = 24
@@ -228,7 +229,7 @@ class App:
         for k in w.keys:
             if not k.taken:
                 box(k.x, k.y, 6, fill=k.color, outline="")
-        route = (a.plan["path"][a.plan["idx"]:] if a.plan else []) if a.adaptive else a.path_ahead(0, 999)
+        route = route_view(s)
         if len(route) > 1:
             pts = [v for x, y in route for v in (x * CELL + CELL / 2, y * CELL + CELL / 2)]
             c.create_line(*pts, fill=COLORS["route" if a.adaptive else "script_route"], width=2, dash=(5, 3), tags="dyn")
@@ -259,35 +260,21 @@ class App:
 
         t = self.tree_text
         t.delete("1.0", "end")
-        if a.tree is None:
+        rows = tree_view(s)
+        if rows is None:
             t.insert("end", "Replanning is off, so there is no behaviour tree.\nThe agent follows a fixed plan made at tick 0.", "idle")
         else:
-            glyph = {"selector": "?", "sequence": "→", "condition": "◇", "action": "▸"}
-            for node, depth in a.tree.walk():
-                tag = node.status if node.stamp == s.t - 1 and node.status else "idle"
-                t.insert("end", "    " * depth + f"{glyph[node.kind]} {node.name}\n", tag)
+            for r in rows:
+                t.insert("end", "    " * r["depth"] + f"{r['glyph']} {r['name']}\n", r["status"] or "idle")
 
         t = self.lock_text
         t.delete("1.0", "end")
-        dials, tag = ["–"] * 5, "dials"
-        if a.hack and a.hack["result"].trace:
-            trace = a.hack["result"].trace
-            for dial, value in trace[:int(a.hack["progress"] / a.hack["need"] * len(trace))]:
-                dials[dial] = "–" if value < 0 else str(value)
-            info = f"Solving... ({a.hack['result'].assignments} assignments, {a.hack['result'].backtracks} backtracks)"
-        elif a.code_version == s.lock.version:
-            dials, tag = [str(v) for v in a.code], "solved"
-            info = f"Cracked with {a.last_hack['result'].assignments} assignments."
-        elif a.code_version >= 0:
-            info = "The clues changed, so the old code no longer works. The agent must solve it again."
-        else:
-            info = "The agent solves this once it holds all three keycards."
-        t.insert("end", "  ".join(dials) + "\n", tag)
+        lock = lock_view(s)
+        t.insert("end", "  ".join("–" if d is None else str(d) for d in lock["dials"]) + "\n", "solved" if lock["state"] == "solved" else "dials")
         t.insert("end", "  ".join(f"D{i + 1}" for i in range(5)) + "\n\nClues:\n", "idle")
-        fresh = s.last_surge[1] if s.last_surge and s.t - s.last_surge[0] < 60 else []
-        for con in s.lock.constraints:
-            t.insert("end", f"  {con.text}\n", "new" if con.text in fresh else "")
-        t.insert("end", "\n" + info + (" New clues are in purple." if fresh else ""))
+        for clue in lock["clues"]:
+            t.insert("end", f"  {clue['text']}\n", "new" if clue["new"] else "")
+        t.insert("end", "\n" + lock["info"])
 
         t = self.log_text
         t.delete("1.0", "end")

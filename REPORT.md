@@ -95,7 +95,7 @@ The drone has three states:
 
 ## 3. Implementation
 
-- **Language and libraries:** Python 3, using only the standard library. The demo window uses Tkinter.
+- **Language and libraries:** Python 3, using only the standard library. The desktop demo uses Tkinter. The web demo runs the same Python code in the browser with Pyodide (Python compiled to WebAssembly).
 - **Reproducibility:** all randomness comes from `random.Random(seed)`, so a seed reproduces the same map, events and results.
 
 | File | Purpose |
@@ -109,11 +109,12 @@ The drone has three states:
 | `escape_room/sim.py` | Simulation loop, dynamic events, collisions, win/lose |
 | `escape_room/evaluation.py`, `evaluate.py` | Evaluation |
 | `tests/test_escape_room.py` | Correctness tests (`unittest`) |
-| `main.py` | Demo window: live map, behaviour tree, lock, log and controls |
+| `main.py` | Desktop demo window: live map, behaviour tree, lock, log and controls |
+| `escape_room/view.py`, `escape_room/web.py`, `index.html`, `web/` | Web demo: the same Python package running in the browser via Pyodide, hosted on Vercel |
 
 **Running it**
 
-- `python main.py` opens the demo.
+- `python main.py` opens the desktop demo. The web demo is at https://ai-escape-room-self.vercel.app (or run `python -m http.server` and open http://localhost:8000).
 - `python -m unittest -v` runs 9 tests.
 - `python evaluate.py` regenerates the results below into `results/`.
 

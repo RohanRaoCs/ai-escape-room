@@ -17,6 +17,8 @@ An AI agent escapes a grid facility. It collects three keycards, solves a lock p
 - **A behaviour tree** decides what to do each tick.
 - **A finite state machine** controls the drone.
 
+**Live demo: https://ai-escape-room-self.vercel.app** (the same Python code, running in the browser through Pyodide)
+
 ![Screenshot](docs/screenshot.png)
 
 ## Requirements
@@ -28,7 +30,8 @@ Python 3.9 or later. Only the standard library is used (Tkinter for the window),
 Run these from the project folder:
 
 ```bash
-python main.py              # interactive demo window
+python main.py              # interactive demo window (desktop)
+python -m http.server       # or: the web version at http://localhost:8000
 python -m unittest -v       # 9 correctness tests
 python evaluate.py          # evaluation on 100 maps per agent -> results/summary.md, results/missions.csv
 python evaluate.py --maps 20   # quicker evaluation
@@ -59,7 +62,8 @@ The design, implementation and full results are in [REPORT.md](REPORT.md).
 ## Files
 
 ```
-main.py                  demo window (Tkinter)
+main.py                  desktop demo window (Tkinter)
+index.html, web/         web demo: loads escape_room/ into the browser with Pyodide
 evaluate.py              evaluation script
 escape_room/
   world.py               map generation (seeded), tiles, keycards, coolant
@@ -70,6 +74,12 @@ escape_room/
   drone.py               drone finite state machine
   sim.py                 simulation loop and dynamic events
   evaluation.py          evaluation helpers
+  view.py                what the panels show (shared by desktop and web)
+  web.py                 bridge between the web page and the simulation
 tests/test_escape_room.py
 results/                 evaluation output used in the report
 ```
+
+## Web version and deployment
+
+The website runs the **same Python package** in the browser through [Pyodide](https://pyodide.org), which is Python compiled to WebAssembly. There is no separate JavaScript implementation of the AI: `web/app.js` only draws the state returned by `escape_room/web.py`. The site is static, so Vercel serves it with no build step (`vercel.json`). To deploy your own copy, import the repository at vercel.com/new and press Deploy.

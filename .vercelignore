@@ -1,0 +1,4 @@
+*.docx
+tests/
+__pycache__/
+.playwright-mcp/
