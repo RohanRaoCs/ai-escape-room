@@ -4,6 +4,8 @@ An AI escape room. A maintenance android, UNIT-7, has to escape a research facil
 
 The agent combines six AI techniques: **A\* search** (planned in space and time), **constraint satisfaction**, a **behaviour tree**, **fuzzy logic**, a **finite state machine** and **Q-learning**.
 
+**Live site: https://ai-escape-room-self.vercel.app** (start with the [Testing guide](https://ai-escape-room-self.vercel.app/testing.html))
+
 ![Simulator](docs/simulator.png)
 
 ## Quick start
