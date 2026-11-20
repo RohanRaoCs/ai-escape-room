@@ -6,8 +6,8 @@
 |---|---|
 | Rohan | to be added |
 | Ibraam | to be added |
-| Vidhi | to be added |
-| Ziya | to be added |
+| Vidhi | 8960008 |
+| Zia | 9619951 |
 | Yousef | to be added |
 
 An AI agent escapes a facility that keeps changing around it. It collects three keycards, solves a lock puzzle at a terminal and reaches the exit. Meanwhile a drone hunts it, laser gates switch on and off, coolant spreads, ceilings collapse onto its route, and power surges rewrite the lock's rules.
