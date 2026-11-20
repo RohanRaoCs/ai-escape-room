@@ -8,7 +8,7 @@ Group 2, Abdullah Wed 10:30–12:30 lab. Submitted to Dr. Abdullah and Dr. Milan
 | Rohan | to be added |
 | Ibraam | to be added |
 | Vidhi | to be added |
-| Ziya | to be added |
+| Zia | to be added |
 | Yousef | to be added |
 
 ## 1. Problem
